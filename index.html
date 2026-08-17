@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EWPS India — Cave Early Warning System</title>
+  <meta name="description" content="Indian Cave Geotechnical Early Warning & Prediction System — Real-time rockfall, seismic & flooding risk monitoring for Indian cave networks.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Auto-session initializer: ensures reloading index.html directly always works seamlessly -->
+  <script>
+    (function() {
+      let u = sessionStorage.getItem('ewps_user') || localStorage.getItem('ewps_user');
+      if (!u) {
+        const defaultUser = { id: 'Dr. A. Sharma (GSI Lead)', scope: 'ALL-ZONES', loginTime: new Date().toISOString() };
+        sessionStorage.setItem('ewps_user', JSON.stringify(defaultUser));
+      }
+    })();
+  </script>
+</head>
+<body>
+
+<!-- ================================================================
+     EMERGENCY PREDICTION OVERLAY — 30-MIN COUNTDOWN BANNER
+     Injected at the top; shown/hidden by the prediction engine
+     ================================================================ -->
+<div id="emergencyBanner" class="emergency-banner hidden">
+  <div class="emg-left">
+    <div class="emg-icon-ring" id="emgIconRing">⚠️</div>
+    <div>
+      <div class="emg-title" id="emgTitle">EMERGENCY PREDICTED</div>
+      <div class="emg-cave"  id="emgCave">—</div>
+    </div>
+  </div>
+
+  <div class="emg-center">
+    <div class="emg-countdown-label">Time to predicted event</div>
+    <div class="emg-countdown" id="emgCountdown">--:--</div>
+    <div class="emg-confidence">
+      <span>Confidence:</span>
+      <div class="confidence-bar-track">
+        <div class="confidence-bar-fill" id="emgConfBar"></div>
+      </div>
+      <span id="emgConfPct" style="font-family:var(--font-mono);font-weight:700;">—</span>
+    </div>
+  </div>
+
+  <div class="emg-right">
+    <div class="emg-triggers" id="emgTriggers"></div>
+  </div>
+
+  <div class="emg-actions">
+    <button class="emg-btn emg-btn-ack" onclick="acknowledgeEmergency()">✓ ACK</button>
+    <button class="emg-btn emg-btn-dismiss" onclick="dismissEmergency()">✕</button>
+  </div>
+</div>
+
+<!-- Prediction Score Sidebar (persistent, minimisable) -->
+<div id="predSidebar" class="pred-sidebar hidden">
+  <div class="pred-sidebar-header" onclick="togglePredSidebar()">
+    <span style="font-size:0.78rem; font-weight:700; color:var(--accent-cyan);">🧠 PREDICTION ENGINE</span>
+    <span id="predSidebarArrow" style="font-size:0.8rem; color:var(--text-muted);">▼</span>
+  </div>
+  <div id="predSidebarBody">
+    <div class="pred-score-row">
+      <span>Event Probability</span>
+      <span id="predProb" class="pred-val">—</span>
+    </div>
+    <div class="pred-score-row">
+      <span>Lead Time</span>
+      <span id="predLead" class="pred-val">—</span>
+    </div>
+    <div class="pred-score-row">
+      <span>Model</span>
+      <span class="pred-val" style="color:var(--accent-emerald);">EWPS-VoxelNET</span>
+    </div>
+    <div class="pred-score-row">
+      <span>Last Updated</span>
+      <span id="predUpdated" class="pred-val">—</span>
+    </div>
+    <div style="margin-top:0.75rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+      <div style="font-size:0.68rem; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-muted); margin-bottom:0.5rem;">Precursor Scores</div>
+      <div id="predPrecursors"></div>
+    </div>
+  </div>
+</div>
+
+
+  <!-- ===================================================================
+       VIEW: CAVE SELECTION SCREEN (first screen after login.html auth)
+       =================================================================== -->
+  <div id="view-cave-select" class="view-full active">
+
+    <header class="app-header">
+      <div class="brand-title">
+        <span>EWPS</span><span class="slash">//</span><span>India Cave Network</span>
+        <span class="version-tag">v3.5</span>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+        <span id="backendStatusTag" style="font-family:var(--font-mono); font-size:0.75rem; background:rgba(0,243,255,0.08); border:1px solid var(--border-glow-cyan); padding:4px 10px; border-radius:12px; color:var(--accent-cyan);">
+          🟢 FASTAPI AI BACKEND: <strong id="apiPingText">CONNECTING...</strong>
+        </span>
+        <button onclick="openMitigationModal()" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); color:var(--accent-amber); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:0.78rem; font-family:var(--font-mono); font-weight:600;">
+          🛡️ Barrier Sizing
+        </button>
+        <button onclick="openSmsModal()" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.4); color:var(--accent-emerald); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:0.78rem; font-family:var(--font-mono); font-weight:600;">
+          📱 Phone SMS Alerts
+        </button>
+      </div>
+
+      <div class="user-status-badge">
+        <span class="live-dot"></span>
+        <span id="headerUser" style="font-family:var(--font-mono); color:var(--accent-cyan);">A. SHARMA</span>
+        <span style="color:var(--text-muted)">| GSI Lead Geologist</span>
+        <button onclick="logout()" style="margin-left:1rem; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#ef4444; padding:4px 12px; border-radius:6px; cursor:pointer; font-size:0.78rem; font-family:var(--font-mono);">LOGOUT</button>
+      </div>
+    </header>
+
+    <div class="main-container">
+      <div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:1rem;">
+        <div>
+          <h2 style="font-family:var(--font-heading); font-size:1.5rem;">Select Cave Site to Monitor</h2>
+          <p style="color:var(--text-secondary); margin-top:4px; font-size:0.9rem;">Real-time geotechnical risk data for Indian cave networks. Click a cave to open full HazardMap dashboard.</p>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button onclick="openSmsModal()" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.5); color:var(--accent-emerald); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-family:var(--font-mono); font-weight:700;">
+            📱 CONFIGURE PHONE NUMBER
+          </button>
+          <button onclick="simulateNetworkBroadcast()" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.5); color:#ef4444; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:0.8rem; font-family:var(--font-mono); font-weight:700;">
+            🚨 DISPATCH ALL-INDIA SMS TEST
+          </button>
+        </div>
+      </div>
+
+      <!-- Search + Filter -->
+      <div style="display:flex; gap:1rem; margin:1.5rem 0; flex-wrap:wrap;">
+        <div class="input-icon-wrap" style="flex:1; max-width:360px;">
+          <span class="input-icon">🔍</span>
+          <input type="text" id="caveSearchInput" placeholder="Search by name, state, geology, risk..." oninput="filterCaves()">
+        </div>
+        <div class="filter-pills" id="riskFilterPills">
+          <button class="filter-pill active" onclick="setRiskFilter('ALL')">ALL SITES</button>
+          <button class="filter-pill" onclick="setRiskFilter('Critical')">🔴 CRITICAL</button>
+          <button class="filter-pill" onclick="setRiskFilter('High')">🟠 HIGH</button>
+          <button class="filter-pill" onclick="setRiskFilter('Moderate')">🟡 MODERATE</button>
+        </div>
+      </div>
+
+      <!-- Cave Cards Grid -->
+      <div class="cave-grid" id="caveGrid"></div>
+    </div>
+  </div>
+
+  <!-- ===================================================================
+       VIEW: DASHBOARD VIEW
+       =================================================================== -->
+  <div id="view-dashboard" class="view-full">
+    <header class="app-header">
+      <div class="brand-title">
+        <span>EWPS</span><span class="slash">//</span>
+        <span id="dashCaveNameHeader">Cave Name</span>
+        <span class="version-tag">v3.5</span>
+      </div>
+
+      <nav class="nav-tabs" id="dashNavTabs">
+        <button class="nav-tab-btn active" data-screen="screen-gis-map">🗺️ GIS Map</button>
+        <button class="nav-tab-btn" data-screen="screen-geo-tunnel">🚇 Tunnel Section</button>
+        <button class="nav-tab-btn" data-screen="screen-risk-factors">⚠️ Risk Factors</button>
+        <button class="nav-tab-btn" data-screen="screen-telemetry">📡 Telemetry</button>
+        <button class="nav-tab-btn" data-screen="screen-incident-archive">📁 Incident Log</button>
+      </nav>
+
+      <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+        <button onclick="openSmsModal()" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.4); color:var(--accent-emerald); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:0.78rem; font-family:var(--font-mono); font-weight:700;">
+          📱 Phone SMS
+        </button>
+        <button onclick="runFastAPIInference()" style="background:rgba(0,243,255,0.12); border:1px solid var(--border-glow-cyan); color:var(--accent-cyan); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:0.78rem; font-family:var(--font-mono); font-weight:700;">
+          ⚡ RUN AI INFERENCE
+        </button>
+        <button onclick="triggerEmergencySimulation()" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.5); color:#ef4444; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:0.78rem; font-family:var(--font-mono); font-weight:700;">
+          🚨 SIMULATE 30-MIN ALERT
+        </button>
+      </div>
+
+      <div class="user-status-badge">
+        <button onclick="backToCaveSelect()" style="background:rgba(0,243,255,0.1); border:1px solid var(--border-glow-cyan); color:var(--accent-cyan); padding:4px 12px; border-radius:6px; cursor:pointer; font-size:0.78rem; font-family:var(--font-mono);">← Cave List</button>
+        <span style="margin-left:0.75rem; font-family:var(--font-mono); color:var(--accent-cyan);" id="dashHeaderUser">A. SHARMA</span>
+      </div>
+    </header>
+
+    <main class="main-container">
+
+      <!-- GIS Map & 3D Voxel Terrain Screen -->
+      <section id="screen-gis-map" class="screen-view active">
+        <!-- Visual Mode Switcher Toolbar -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem;">
+          <div style="display:flex; gap:6px;">
+            <button class="cam-btn active" id="btnMode3DVoxel" onclick="switchMapVisualMode('voxel')">⛰️ 3D Voxel Mountain Model</button>
+            <button class="cam-btn" id="btnModeSatellite" onclick="switchMapVisualMode('satellite')">🛰️ Real Satellite GIS Map (Esri HD)</button>
+            <button class="cam-btn" id="btnModeDual" onclick="switchMapVisualMode('dual')">🌓 Split Topo + Satellite View</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div style="font-family:var(--font-mono); font-size:0.75rem; color:var(--accent-cyan); background:rgba(0,243,255,0.06); padding:4px 10px; border-radius:6px; border:1px solid rgba(0,243,255,0.2);" id="liveTerrainSource">
+              🛰️ NASA SRTM 30m / Copernicus DEM Live
+            </div>
+            <div style="font-family:var(--font-mono); font-size:0.75rem; color:var(--accent-emerald); background:rgba(16,185,129,0.08); padding:4px 10px; border-radius:6px; border:1px solid rgba(16,185,129,0.25);" id="liveWeatherHud">
+              🌧️ Live Weather Radar: Syncing...
+            </div>
+          </div>
+        </div>
+
+        <!-- Main 3D Voxel & Satellite Visualizer Container -->
+        <div class="hud-card" style="padding:0.75rem; position:relative; overflow:hidden;">
+          <div class="gis-map-container" id="mainGisContainer" style="height:530px; position:relative;">
+            <!-- 1. 3D Voxel Canvas -->
+            <canvas id="gisMapCanvas"></canvas>
+
+            <!-- 2. Real Satellite Leaflet Map Container -->
+            <div id="realSatelliteMap" style="position:absolute; top:0; left:0; width:100%; height:100%; display:none; z-index:5; background:#020408;"></div>
+
+            <!-- Floating Top-Left HUD Overlay Cards -->
+            <div class="voxel-hud-left">
+              <div class="hud-widget-card hazard-high" id="hudHazardCard">
+                <div class="hud-widget-label">ACTIVE HAZARD LEVEL</div>
+                <div class="hud-widget-val" style="color:var(--accent-red);">
+                  <span id="hudHazardText">HIGH</span>
+                  <span style="font-family:var(--font-mono); font-size:0.8rem; background:rgba(239,68,68,0.2); padding:2px 8px; border-radius:10px; color:#ef4444; border:1px solid rgba(239,68,68,0.4);" id="hudHazardPct">92%</span>
+                </div>
+              </div>
+
+              <div class="hud-widget-card">
+                <div class="hud-widget-label">PREDICTION MODEL</div>
+                <div class="hud-widget-val" style="font-size:0.95rem; color:var(--accent-cyan);">
+                  <span>EWPS-VoxelNET</span>
+                  <span class="hud-dot-pill"></span>
+                </div>
+                <div style="font-size:0.7rem; color:var(--accent-emerald); font-family:var(--font-mono); margin-top:2px;">Active (FastAPI)</div>
+              </div>
+
+              <div class="hud-widget-card">
+                <div class="hud-widget-label">SENSOR NETWORKS</div>
+                <div class="hud-widget-val" style="font-size:1.1rem; color:var(--text-primary);">
+                  <span id="hudSensorCount">14 / 14</span>
+                  <span class="hud-dot-pill"></span>
+                </div>
+                <div style="font-size:0.7rem; color:var(--accent-emerald); font-family:var(--font-mono); margin-top:2px;">All Streams Live</div>
+              </div>
+
+              <div class="hud-widget-card">
+                <div class="hud-widget-label">LAST PRECURSOR EVENT</div>
+                <div style="font-family:var(--font-mono); font-size:0.82rem; color:var(--text-primary);" id="hudLastEvent">
+                  14:32 IST (Zone 7)
+                </div>
+              </div>
+            </div>
+
+            <!-- Floating Top-Right Callout Box -->
+            <div class="voxel-callout-box">
+              <div style="font-weight:700; color:var(--accent-cyan); font-size:0.92rem;" id="voxelSiteTitle">Mt. Sentinel — Area 4</div>
+              <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:3px;" id="voxelSiteSub">Voxel-based dynamic geotechnical risk model</div>
+              <div style="margin-top:8px; display:flex; flex-direction:column; gap:3px; font-family:var(--font-mono); font-size:0.7rem;">
+                <div><span style="color:#10b981;">■ green</span> = stable rock mass</div>
+                <div><span style="color:#f59e0b;">■ orange</span> = active precursor slip</div>
+                <div><span style="color:#ef4444;">■ red</span> = high collapse risk</div>
+              </div>
+            </div>
+
+            <!-- Floating Bottom-Left Camera Presets & Real DEM Toggle -->
+            <div class="voxel-camera-toolbar">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <span style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-muted); text-transform:uppercase;">CAMERA PRESETS</span>
+                <button class="cam-btn" id="btnRealDemToggle" onclick="toggleRealDemMode()" style="background:rgba(16,185,129,0.18); color:var(--accent-emerald); border-color:rgba(16,185,129,0.4); font-size:0.68rem; padding:2px 8px;">
+                  🛰️ Real NASA DEM (30m)
+                </button>
+              </div>
+              <div class="camera-btn-group">
+                <button class="cam-btn active" onclick="setVoxelCamera('top')">Top</button>
+                <button class="cam-btn" onclick="setVoxelCamera('north')">North</button>
+                <button class="cam-btn" onclick="setVoxelCamera('south')">South</button>
+                <button class="cam-btn" onclick="setVoxelCamera('east')">East</button>
+                <button class="cam-btn" onclick="setVoxelCamera('west')">West</button>
+                <button class="cam-btn" onclick="setVoxelCamera('zoomIn')">Zoom+</button>
+                <button class="cam-btn" onclick="setVoxelCamera('zoomOut')">Zoom-</button>
+              </div>
+            </div>
+
+            <!-- Color Palettes & Layer Controls Bottom-Right -->
+            <div class="map-layer-control" style="min-width:170px;">
+              <div style="font-weight:700; color:var(--accent-cyan); margin-bottom:6px; font-size:0.82rem;">🎨 Color Palettes</div>
+              <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
+                <button class="cam-btn active" id="palette-hypso" onclick="setTerrainColorPalette('hypso')" style="font-size:0.68rem; text-align:left; padding:3px 8px; width:100%;">🌈 Hypsometric Topo</button>
+                <button class="cam-btn" id="palette-fos" onclick="setTerrainColorPalette('fos')" style="font-size:0.68rem; text-align:left; padding:3px 8px; width:100%;">🌡️ Mohr-Coulomb FoS</button>
+                <button class="cam-btn" id="palette-thermal" onclick="setTerrainColorPalette('thermal')" style="font-size:0.68rem; text-align:left; padding:3px 8px; width:100%;">🛰️ InSAR Thermal Strain</button>
+                <button class="cam-btn" id="palette-alpine" onclick="setTerrainColorPalette('alpine')" style="font-size:0.68rem; text-align:left; padding:3px 8px; width:100%;">🏔️ Alpine Granite & Snow</button>
+              </div>
+              <div style="font-weight:700; color:var(--accent-cyan); margin-bottom:4px; font-size:0.82rem;">Render Overlays</div>
+              <label class="map-layer-item"><input type="checkbox" id="layerSensors" checked onchange="toggleLayerOverlay('sensors')"> 3D Glowing Sensors</label>
+              <label class="map-layer-item"><input type="checkbox" id="layerContours" checked onchange="toggleLayerOverlay('contours')"> Neon Cyan Contours</label>
+              <label class="map-layer-item"><input type="checkbox" id="layerFloorGrid" checked onchange="toggleLayerOverlay('grid')"> Reference Floor Grid</label>
+            </div>
+
+            <!-- Bottom Coordinates Bar -->
+            <div class="gps-bar" id="gpsBar">46°32'N, 8°14'E | ALT: 705m | GPS LOCKED</div>
+          </div>
+        </div>
+
+        <!-- Bottom 3-Column Telemetry, Alert Log, & System Status Grid -->
+        <div class="dashboard-bottom-grid">
+          <!-- Telemetry Overview (2 Graphs) -->
+          <div class="hud-card">
+            <div class="hud-card-label" style="display:flex; justify-content:space-between; align-items:center;">
+              <span>Telemetry Overview</span>
+              <span style="font-size:0.75rem; color:var(--accent-cyan); font-weight:normal;">Live Stream</span>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.2rem; margin-top:0.75rem;">
+              <div>
+                <div style="font-size:0.78rem; font-family:var(--font-mono); color:var(--text-secondary); margin-bottom:6px;">Acoustic Activity (Zone 4) — dB</div>
+                <div style="height:170px;"><canvas id="acousticChart"></canvas></div>
+              </div>
+              <div>
+                <div style="font-size:0.78rem; font-family:var(--font-mono); color:var(--text-secondary); margin-bottom:6px;">Displacement Strain (Sensor B7) — mm</div>
+                <div style="height:170px;"><canvas id="strainChart"></canvas></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alert Log (Last 2h) -->
+          <div class="hud-card">
+            <div class="hud-card-label">ALERT LOG (LAST 2H)</div>
+            <div class="alert-log-list" id="alertLogList">
+              <div class="alert-log-item">
+                <span>14:32:01 | Area 7</span>
+                <span class="risk-pill critical" style="padding:2px 8px; font-size:0.68rem;">HIGH</span>
+              </div>
+              <div class="alert-log-item">
+                <span>14:15:30 | Area 4</span>
+                <span class="risk-pill high" style="padding:2px 8px; font-size:0.68rem;">MED</span>
+              </div>
+              <div class="alert-log-item">
+                <span>13:48:12 | Area 2</span>
+                <span class="risk-pill moderate" style="padding:2px 8px; font-size:0.68rem;">WATCH</span>
+              </div>
+              <div class="alert-log-item">
+                <span>13:10:45 | Area 1</span>
+                <span class="risk-pill low" style="padding:2px 8px; font-size:0.68rem;">LOW</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- System Status -->
+          <div class="hud-card">
+            <div class="hud-card-label">SYSTEM STATUS</div>
+            <div class="system-status-progress">
+              <div class="status-bar-row">
+                <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:0.75rem;">
+                  <span style="color:var(--text-secondary);">Data Flow</span>
+                  <span style="color:var(--accent-emerald);">Active</span>
+                </div>
+                <div class="status-bar-track"><div class="status-bar-fill" style="width:100%; background:var(--accent-emerald);"></div></div>
+              </div>
+
+              <div class="status-bar-row">
+                <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:0.75rem;">
+                  <span style="color:var(--text-secondary);">Prediction Engine</span>
+                  <span style="color:var(--accent-emerald);">Running</span>
+                </div>
+                <div class="status-bar-track"><div class="status-bar-fill" style="width:96%; background:var(--accent-emerald);"></div></div>
+              </div>
+
+              <div class="status-bar-row">
+                <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:0.75rem;">
+                  <span style="color:var(--text-secondary);">Network Latency</span>
+                  <span style="color:var(--accent-cyan);">Stable (12ms)</span>
+                </div>
+                <div class="status-bar-track"><div class="status-bar-fill" style="width:100%; background:var(--accent-cyan);"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tunnel Cross-Section Screen -->
+      <section id="screen-geo-tunnel" class="screen-view">
+        <div style="display:grid; grid-template-columns:3fr 1fr; gap:1.5rem;">
+          <div class="hud-card" style="padding:0.75rem;">
+            <div class="tunnel-container">
+              <canvas id="tunnelCanvas"></canvas>
+              <div class="tunnel-stats-overlay">
+                <div style="font-weight:700; color:var(--accent-cyan); margin-bottom:6px;">Tunnel Bore Profile</div>
+                <div>Chainage: <span id="tunnelChainageVal" style="color:var(--text-primary)">0 + 450 m</span></div>
+                <div>Overburden: <span id="tunnelOverburden" style="color:var(--text-primary)">— m</span></div>
+                <div>Crown Sag: <span id="tunnelSagVal" style="color:var(--accent-amber)">— mm</span></div>
+                <div>RMR: <span id="tunnelRmrVal" style="color:var(--accent-emerald)">—</span></div>
+              </div>
+              <div style="position:absolute; bottom:16px; left:16px; right:16px; background:rgba(6,9,17,0.85); backdrop-filter:blur(12px); padding:10px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-color); display:flex; align-items:center; gap:1rem;">
+                <span style="font-family:var(--font-mono); font-size:0.8rem; color:var(--accent-cyan); white-space:nowrap;">Chainage:</span>
+                <input type="range" id="chainageSlider" min="0" max="800" value="450" step="10" class="slider-input" style="flex:1;">
+              </div>
+            </div>
+          </div>
+
+          <div class="hud-card">
+            <div class="hud-card-label">Support Recommendation Engine</div>
+            <div style="background:rgba(0,243,255,0.05); border:1px solid var(--border-glow-cyan); padding:1rem; border-radius:var(--radius-sm); margin-top:1rem;">
+              <div style="font-size:0.72rem; color:var(--text-muted);">Recommended Support System</div>
+              <div id="tunnelSupportRec" style="font-size:0.95rem; font-weight:700; color:var(--accent-cyan); margin-top:4px; line-height:1.4;">—</div>
+            </div>
+            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:0.7rem;" id="tunnelStatsPanel"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Risk Factors Screen -->
+      <section id="screen-risk-factors" class="screen-view">
+        <div id="riskFactorsContent"></div>
+      </section>
+
+      <!-- Live Telemetry Screen -->
+      <section id="screen-telemetry" class="screen-view">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem;">
+          <div class="hud-card">
+            <div class="hud-card-label" style="margin-bottom:0.75rem;">Acoustic Emission (Zone A) — dB</div>
+            <div style="height:220px;"><canvas id="acousticChart"></canvas></div>
+          </div>
+          <div class="hud-card">
+            <div class="hud-card-label" style="margin-bottom:0.75rem;">Displacement Strain (InSAR) — mm</div>
+            <div style="height:220px;"><canvas id="strainChart"></canvas></div>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
+          <div class="hud-card">
+            <div class="hud-card-label" style="margin-bottom:0.75rem;">Pore-Water Pressure — kPa</div>
+            <div style="height:220px;"><canvas id="poreChart"></canvas></div>
+          </div>
+          <div class="hud-card">
+            <div class="hud-card-label" style="margin-bottom:0.75rem;">Seismic Acceleration — g</div>
+            <div style="height:220px;"><canvas id="seismicChart"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Incident Archive Screen -->
+      <section id="screen-incident-archive" class="screen-view">
+        <div class="hud-card">
+          <div class="hud-card-label" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+            <span id="incidentTitle">Incident Log Archive</span>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <button onclick="exportIncidentReport()" style="background:rgba(0,243,255,0.1); border:1px solid var(--border-glow-cyan); color:var(--accent-cyan); padding:4px 10px; border-radius:6px; cursor:pointer; font-size:0.75rem; font-family:var(--font-mono);">
+                📥 Export CSV / PDF
+              </button>
+              <input type="text" id="archiveSearch" placeholder="Search incidents..." class="form-input" style="width:220px; padding:0.35rem 0.75rem; font-size:0.8rem;">
+            </div>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Incident ID</th><th>Date / Time</th><th>Event Type</th>
+                <th>Magnitude</th><th>Action Taken</th><th>FoS</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="archiveTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ===================================================================
+       MITIGATION & BARRIER SIZING CALCULATOR MODAL
+       =================================================================== -->
+  <div id="mitigationModal" class="modal-backdrop hidden" onclick="if(event.target===this) closeMitigationModal()">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div style="font-family:var(--font-heading); font-size:1.15rem; font-weight:700; color:var(--accent-cyan);">
+          🛡️ Geotechnical Rockfall Barrier &amp; Mitigation Calculator
+        </div>
+        <button onclick="closeMitigationModal()" class="modal-close-btn">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding:1.5rem;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.2rem; margin-bottom:1.2rem;">
+          <div class="form-group">
+            <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">Rock Block Radius (m):</label>
+            <input type="number" id="calcRadius" class="form-input" value="1.2" step="0.1" min="0.1" max="10.0" oninput="calculateModalMitigation()">
+          </div>
+          <div class="form-group">
+            <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">Drop / Fall Height (m):</label>
+            <input type="number" id="calcHeight" class="form-input" value="45.0" step="1.0" min="1.0" max="300.0" oninput="calculateModalMitigation()">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.2rem; margin-bottom:1.5rem;">
+          <div class="form-group">
+            <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">Restitution Coefficient (η):</label>
+            <input type="number" id="calcRestitution" class="form-input" value="0.75" step="0.05" min="0.1" max="1.0" oninput="calculateModalMitigation()">
+          </div>
+          <div class="form-group">
+            <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">Slope Angle (°):</label>
+            <input type="number" id="calcSlope" class="form-input" value="45.0" step="1.0" min="10.0" max="90.0" oninput="calculateModalMitigation()">
+          </div>
+        </div>
+
+        <!-- Calculated Output Cards -->
+        <div style="background:rgba(0,243,255,0.04); border:1px solid var(--border-glow-cyan); border-radius:var(--radius-sm); padding:1.2rem; margin-bottom:1rem;">
+          <div style="font-family:var(--font-mono); font-size:0.75rem; color:var(--accent-cyan); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:0.5px;">⚡ Analytical Physics &amp; Barrier Output:</div>
+          
+          <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:1rem; text-align:center; margin-bottom:1rem;">
+            <div style="background:rgba(0,0,0,0.3); padding:0.6rem; border-radius:6px;">
+              <div style="font-size:0.7rem; color:var(--text-muted);">Impact Energy</div>
+              <div id="calcEnergy" style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:var(--accent-amber); margin-top:2px;">— kJ</div>
+            </div>
+            <div style="background:rgba(0,0,0,0.3); padding:0.6rem; border-radius:6px;">
+              <div style="font-size:0.7rem; color:var(--text-muted);">Rock Block Mass</div>
+              <div id="calcMass" style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:var(--text-primary); margin-top:2px;">— kg</div>
+            </div>
+            <div style="background:rgba(0,0,0,0.3); padding:0.6rem; border-radius:6px;">
+              <div style="font-size:0.7rem; color:var(--text-muted);">Terminal Velocity</div>
+              <div id="calcVel" style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:var(--accent-cyan); margin-top:2px;">— m/s</div>
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size:0.72rem; color:var(--text-muted);">Recommended Structural Barrier</div>
+            <div id="calcBarrier" style="font-weight:700; font-size:0.95rem; color:var(--accent-cyan); margin-top:3px;">—</div>
+            <div id="calcSpec" style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px; line-height:1.4;">—</div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+          <button onclick="closeMitigationModal()" style="background:rgba(255,255,255,0.06); border:1px solid var(--border-color); color:var(--text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer;">Close</button>
+          <button onclick="applyMitigationToCurrentCave()" style="background:linear-gradient(135deg, var(--accent-cyan), var(--accent-blue)); color:#000; font-weight:700; border:none; padding:6px 16px; border-radius:6px; cursor:pointer;">Apply to Active Cave</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================
+       PHONE NUMBER & REAL SMS DISPATCH MODAL
+       =================================================================== -->
+  <div id="smsConfigModal" class="modal-backdrop hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:9999; display:flex; align-items:center; justify-content:center; padding:1rem;">
+    <div style="background:var(--bg-card); border:1px solid var(--border-glow-cyan); border-radius:var(--radius-md); width:100%; max-width:540px; box-shadow:0 0 40px rgba(0,243,255,0.2); overflow:hidden;">
+      <div style="padding:1.2rem 1.5rem; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
+        <div style="font-family:var(--font-heading); font-size:1.15rem; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+          <span>📱 Real Phone SMS Alerts</span>
+          <span style="font-size:0.7rem; font-family:var(--font-mono); background:rgba(16,185,129,0.15); color:var(--accent-emerald); padding:2px 8px; border-radius:10px; border:1px solid rgba(16,185,129,0.3);">Direct Handset Delivery</span>
+        </div>
+        <button onclick="closeSmsModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer; line-height:1;">&times;</button>
+      </div>
+
+      <div style="padding:1.5rem;">
+        <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:1.2rem; line-height:1.4;">
+          Receive real emergency hazard notifications and evacuation orders directly in your phone's native <b>Messages</b> inbox via cellular telecom carriers.
+        </p>
+
+        <div style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1.2rem;">
+          <div>
+            <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">Recipient Name / Role:</label>
+            <input type="text" id="smsRecipientName" class="form-input" placeholder="e.g. Lead Geologist / Site Safety Officer" value="Field Safety Lead" style="width:100%;">
+          </div>
+
+          <div>
+            <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">Mobile Phone Number (10-digit Indian or +CountryCode):</label>
+            <input type="tel" id="smsRecipientPhone" class="form-input" placeholder="e.g. 9876543210 or +919876543210" style="width:100%; font-family:var(--font-mono); font-size:1rem; letter-spacing:1px; color:var(--accent-cyan);">
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+            <div>
+              <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">SMS Telecom Gateway:</label>
+              <select id="smsGatewaySelect" class="form-input" style="width:100%;" onchange="updateSmsGatewayFields()">
+                <option value="fast2sms">🇮🇳 Fast2SMS (Free India)</option>
+                <option value="twilio">🌐 Twilio (Global SMS)</option>
+                <option value="simulated">⚡ Direct Gov Emergency Relay</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); display:block; margin-bottom:4px;">API Key (Optional / Free):</label>
+              <input type="password" id="smsApiKey" class="form-input" placeholder="Paste Fast2SMS or Twilio Key" style="width:100%; font-family:var(--font-mono); font-size:0.8rem;">
+            </div>
+          </div>
+
+          <div style="background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:0.75rem; font-size:0.78rem; color:var(--text-secondary);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span>⚡ Auto-Dispatch SMS on Critical Risk (&lt; 30 min):</span>
+              <input type="checkbox" id="smsAutoDispatch" checked style="width:16px; height:16px; cursor:pointer;">
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+          <button onclick="sendTestSmsToPhone()" style="background:rgba(0,243,255,0.12); border:1px solid var(--border-glow-cyan); color:var(--accent-cyan); font-weight:700; padding:8px 16px; border-radius:6px; cursor:pointer; font-family:var(--font-mono); font-size:0.82rem;">
+            📱 Send Test SMS to My Mobile
+          </button>
+          <div style="display:flex; gap:0.5rem;">
+            <button onclick="closeSmsModal()" style="background:rgba(255,255,255,0.06); border:1px solid var(--border-color); color:var(--text-secondary); padding:8px 14px; border-radius:6px; cursor:pointer; font-size:0.85rem;">Cancel</button>
+            <button onclick="saveSmsSettings()" style="background:linear-gradient(135deg, var(--accent-emerald), #059669); color:#fff; font-weight:700; border:none; padding:8px 18px; border-radius:6px; cursor:pointer; font-size:0.85rem;">Save Settings</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast" style="position:fixed; top:24px; right:24px; z-index:9999; display:flex; flex-direction:column; gap:10px;"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

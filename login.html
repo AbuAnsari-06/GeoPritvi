@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EWPS India — Secure Operator Portal & GIS Hazard Map</title>
+  <meta name="description" content="EWPS India — Secure operator login, interactive GIS hazard map, and field worker SMS emergency alert registration system. GSI · NRSC · IIT Bombay.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet CSS & JS for Real GIS Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <style>
+    /* ========== Design Tokens ========== */
+    :root {
+      --bg:          #060911;
+      --card-bg:     rgba(10,16,30,0.92);
+      --cyan:        #00f3ff;
+      --blue:        #3b82f6;
+      --danger:      #ef4444;
+      --amber:       #f59e0b;
+      --emerald:     #10b981;
+      --text:        #f8fafc;
+      --muted:       #94a3b8;
+      --dimmed:      #475569;
+      --border:      rgba(255,255,255,0.08);
+      --border-cyan: rgba(0,243,255,0.35);
+      --glow-cyan:   0 0 28px rgba(0,243,255,0.28);
+      --glow-red:    0 0 28px rgba(239,68,68,0.38);
+      --radius:      14px;
+      --radius-sm:   8px;
+      --tx:          all 0.22s cubic-bezier(.4,0,.2,1);
+      --mono:       'Fira Code', monospace;
+      --sans:       'Outfit', -apple-system, sans-serif;
+      --head:       'Space Grotesk', var(--sans);
+    }
+
+    /* ========== Reset ========== */
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    ::-webkit-scrollbar { width:6px; }
+    ::-webkit-scrollbar-thumb { background: rgba(0,243,255,0.2); border-radius:3px; }
+
+    /* ========== Real Interactive Leaflet Map Background ========== */
+    #realMap {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+    }
+    
+    /* Dark overlay on map so login form stands out */
+    .map-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      background: radial-gradient(circle at 75% 50%, rgba(6,9,17,0.4) 0%, rgba(6,9,17,0.85) 70%, rgba(6,9,17,0.95) 100%);
+      pointer-events: none;
+    }
+
+    /* ========== Layout ========== */
+    .page {
+      position: relative;
+      z-index: 2;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem 1rem 4rem 1rem;
+    }
+
+    /* ========== Top Map Mode Toggle ========== */
+    .map-toggle-bar {
+      position: fixed;
+      top: 16px;
+      right: 20px;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(10,16,30,0.88);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-cyan);
+      padding: 6px 14px;
+      border-radius: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+    .map-toggle-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      cursor: pointer;
+      padding: 4px 10px;
+      border-radius: 12px;
+      transition: var(--tx);
+    }
+    .map-toggle-btn.active {
+      background: rgba(0,243,255,0.2);
+      color: var(--cyan);
+      font-weight: 600;
+    }
+
+    /* ========== Brand Logo ========== */
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      margin-bottom: 1.25rem;
+      text-align: left;
+    }
+
+    .brand-ring {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(0,243,255,0.06);
+      border: 1.5px solid var(--border-cyan);
+      box-shadow: var(--glow-cyan);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .ring-rotate { transform-origin: 30px 30px; animation: spin 20s linear infinite; }
+
+    .brand-name {
+      font-family: var(--head);
+      font-size: 2.1rem;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .brand-name .slash { color: var(--cyan); font-family: var(--mono); }
+    .brand-sub {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* ========== Live Alert Ticker ========== */
+    .alert-ticker {
+      width: 100%;
+      max-width: 540px;
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.4);
+      border-radius: var(--radius-sm);
+      padding: 8px 16px;
+      margin-bottom: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--danger);
+      box-shadow: 0 4px 15px rgba(239,68,68,0.2);
+    }
+    .ticker-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+      flex-shrink: 0;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
+
+    /* ========== Portal Container (Tabs: Login vs Worker Alert Signup) ========== */
+    .portal-container {
+      width: 100%;
+      max-width: 540px;
+      background: var(--card-bg);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      border: 1.5px solid var(--border-cyan);
+      border-radius: var(--radius);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.85), var(--glow-cyan);
+      overflow: hidden;
+    }
+
+    /* Tabs Header */
+    .portal-tabs {
+      display: flex;
+      background: rgba(0,0,0,0.4);
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 1rem;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: var(--head);
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--tx);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-bottom: 2px solid transparent;
+    }
+    .tab-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .tab-btn.active {
+      color: var(--cyan);
+      background: rgba(0,243,255,0.06);
+      border-bottom-color: var(--cyan);
+    }
+
+    .tab-content {
+      padding: 2rem;
+      display: none;
+    }
+    .tab-content.active { display: block; }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+      padding-bottom: 0.85rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .header-live {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-family: var(--mono); font-size: 0.75rem; color: var(--muted);
+    }
+    .live-dot { width:7px; height:7px; border-radius:50%; background:var(--emerald); animation:pulse 1.4s ease infinite; }
+
+    .card-title {
+      font-family: var(--head);
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    /* ========== Form Elements ========== */
+    .form-group { margin-bottom: 1.2rem; }
+    .form-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.84rem;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    .label-hint { font-size: 0.73rem; color: var(--dimmed); }
+    .forgot-link { cursor: pointer; color: var(--cyan); font-size: 0.75rem; text-decoration: none; }
+    .forgot-link:hover { text-decoration: underline; }
+
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .input-icon {
+      position: absolute;
+      left: 13px;
+      font-size: 1rem;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .field {
+      width: 100%;
+      padding: 0.82rem 1rem 0.82rem 2.75rem;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 0.92rem;
+      outline: none;
+      transition: var(--tx);
+    }
+    .field::placeholder { color: var(--dimmed); }
+    .field:focus {
+      border-color: var(--cyan);
+      background: rgba(0,243,255,0.04);
+      box-shadow: 0 0 18px rgba(0,243,255,0.16);
+    }
+    select.field {
+      appearance: none;
+      cursor: pointer;
+    }
+    select.field option {
+      background: #0d1423;
+      color: #fff;
+    }
+
+    .eye-btn {
+      position: absolute; right: 13px;
+      background: none; border: none;
+      cursor: pointer; color: var(--dimmed);
+      font-size: 1rem; transition: var(--tx); padding: 0;
+    }
+    .eye-btn:hover { color: var(--text); }
+
+    .checkbox-row {
+      display: flex; align-items: center; gap: 0.7rem;
+      margin-bottom: 1.4rem;
+    }
+    .checkbox-row input { accent-color: var(--cyan); width:16px; height:16px; cursor:pointer; }
+    .checkbox-row label { font-size: 0.84rem; color: var(--muted); cursor: pointer; }
+
+    .btn-submit {
+      width: 100%;
+      padding: 0.88rem;
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #000;
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: var(--tx);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+    }
+    .btn-submit:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 0 35px rgba(0,243,255,0.45);
+    }
+    .btn-submit.btn-sms {
+      background: linear-gradient(135deg, var(--emerald), #059669);
+      color: #fff;
+    }
+    .btn-submit.btn-sms:hover:not(:disabled) {
+      box-shadow: 0 0 35px rgba(16,185,129,0.45);
+    }
+
+    .error-box {
+      display: none; margin-top: 1rem;
+      padding: 0.8rem 1rem;
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.38);
+      border-radius: var(--radius-sm);
+      color: var(--danger);
+      font-size: 0.82rem;
+      font-family: var(--mono);
+      text-align: center;
+    }
+    .error-box.active { display: block; animation: shake .35s ease; }
+    @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 60%{transform:translateX(6px)} }
+
+    .auth-progress {
+      display: none; margin-top: 1rem;
+      height: 3px; background: rgba(255,255,255,0.06);
+      border-radius: 2px; overflow: hidden;
+    }
+    .auth-progress.active { display: block; }
+    .auth-bar {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--cyan), var(--blue));
+      border-radius: 2px; transition: width 0.08s linear;
+    }
+
+    /* ========== Active Worker Alerts Display Box ========== */
+    .registered-alerts-box {
+      margin-top: 1.2rem;
+      background: rgba(16,185,129,0.08);
+      border: 1px solid rgba(16,185,129,0.3);
+      border-radius: var(--radius-sm);
+      padding: 1rem;
+    }
+    .alert-box-title {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--emerald);
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 0.5rem;
+    }
+    .sms-preview-bubble {
+      background: rgba(0,0,0,0.5);
+      border: 1px dashed rgba(0,243,255,0.3);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+
+    /* Security Row */
+    .security-row {
+      display: flex; align-items: center; justify-content: center;
+      gap: 1.2rem; margin-top: 1.2rem; padding-top: 1rem;
+      border-top: 1px solid var(--border); flex-wrap: wrap;
+    }
+    .sec-badge {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 0.72rem; color: var(--dimmed); font-family: var(--mono);
+    }
+
+    .footer {
+      margin-top: 1.25rem; text-align: center;
+      font-size: 0.72rem; color: var(--dimmed); line-height: 1.5;
+    }
+    .footer strong { color: var(--muted); }
+
+    /* ========== Status Strip ========== */
+    .status-strip {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      z-index: 100;
+      background: rgba(4,7,14,0.92);
+      backdrop-filter: blur(16px);
+      border-top: 1px solid var(--border);
+      padding: 8px 2rem;
+      display: flex; align-items: center; gap: 2rem; flex-wrap: wrap;
+    }
+    .status-item {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 0.73rem; color: var(--muted);
+    }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .online  { background: var(--emerald); }
+    .warning { background: var(--amber); animation: pulse 1.2s infinite; }
+
+    /* ========== Toast ========== */
+    #toast {
+      position: fixed; top: 24px; right: 24px; z-index: 9999;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .toast-item {
+      padding: 11px 18px; border-radius: var(--radius-sm);
+      font-family: var(--sans); font-weight: 600; font-size: 0.86rem;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.5); opacity: 0;
+      transform: translateY(-10px); transition: opacity .25s ease, transform .25s ease;
+    }
+    .toast-item.info   { background: rgba(0,243,255,0.9); color:#000; }
+    .toast-item.success{ background: rgba(16,185,129,0.9); color:#000; }
+    .toast-item.danger { background: rgba(239,68,68,0.9); color:#fff; }
+
+    /* Custom Leaflet Map styling */
+    .leaflet-container { background: #060911 !important; }
+    .custom-cave-popup .leaflet-popup-content-wrapper {
+      background: rgba(10,16,30,0.95);
+      border: 1px solid var(--cyan);
+      color: var(--text);
+      font-family: var(--sans);
+      border-radius: 10px;
+      backdrop-filter: blur(12px);
+    }
+    .custom-cave-popup .leaflet-popup-tip { background: var(--cyan); }
+  </style>
+</head>
+<body>
+
+<!-- Real Interactive GIS Map Container -->
+<div id="realMap"></div>
+<div class="map-overlay"></div>
+
+<!-- Map Mode Toggle Bar -->
+<div class="map-toggle-bar">
+  <span style="font-family:var(--mono); font-size:0.75rem; color:var(--muted);">MAP VIEW:</span>
+  <button class="map-toggle-btn active" id="btnRealMap">🗺️ Interactive GIS Map</button>
+  <button class="map-toggle-btn" id="btnSatelliteMap">🛰️ Satellite View</button>
+</div>
+
+<div class="page">
+  <!-- Brand -->
+  <div class="brand">
+    <div class="brand-ring">
+      <svg width="54" height="54" viewBox="0 0 60 60">
+        <circle cx="30" cy="30" r="22" fill="none" stroke="#00f3ff" stroke-width="1.5" stroke-dasharray="8 5" class="ring-rotate"/>
+        <circle cx="30" cy="30" r="12" fill="rgba(0,243,255,0.08)" stroke="#00f3ff" stroke-width="1"/>
+        <text x="30" y="35" text-anchor="middle" fill="#00f3ff" font-family="Space Grotesk" font-size="13" font-weight="700">EW</text>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-name">EWPS <span class="slash">// India</span></div>
+      <div class="brand-sub">Real-Time GIS Hazard Map &amp; Early Warning System</div>
+    </div>
+  </div>
+
+  <!-- Live alert ticker -->
+  <div class="alert-ticker" id="alertTicker">
+    <div class="ticker-dot"></div>
+    <span id="tickerText">🔴 AMARNATH CAVE — Pore Pressure Surge +18% | 30-min Hazard Window Active</span>
+  </div>
+
+  <!-- Portal Container with Tabs -->
+  <div class="portal-container">
+    <div class="portal-tabs">
+      <button class="tab-btn active" id="tabLoginBtn" onclick="switchTab('login')">
+        🔒 Operator Login
+      </button>
+      <button class="tab-btn" id="tabWorkerBtn" onclick="switchTab('worker')">
+        📲 Worker En-Route SMS Alert
+      </button>
+    </div>
+
+    <!-- TAB 1: OPERATOR LOGIN -->
+    <div class="tab-content active" id="tabLogin">
+      <div class="card-header">
+        <div class="header-live"><span class="live-dot"></span> SYSTEM ONLINE — TLS 1.3</div>
+        <div class="card-title">Operator Access</div>
+      </div>
+
+      <form id="loginForm" novalidate>
+        <div class="form-group">
+          <div class="form-label">
+            <span>Operator Badge ID</span>
+            <span class="label-hint">GSI · NRSC · IIT Format</span>
+          </div>
+          <div class="input-wrap">
+            <span class="input-icon">🪪</span>
+            <input type="text" id="userId" class="field" placeholder="e.g. CAVE-GSI-0042 or operator@gsi.gov.in" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-label">
+            <span>Security Passcode / Token</span>
+            <a class="forgot-link" id="forgotBtn">Forgot?</a>
+          </div>
+          <div class="input-wrap">
+            <span class="input-icon">🔑</span>
+            <input type="password" id="userPass" class="field" placeholder="Enter your secure token" required>
+            <button type="button" class="eye-btn" id="eyeBtn">👁</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-label">
+            <span>Access Scope</span>
+            <span class="label-hint">Optional</span>
+          </div>
+          <div class="input-wrap">
+            <span class="input-icon">🏔️</span>
+            <input type="text" id="accessScope" class="field" placeholder="e.g. AMARNATH, BORRA">
+          </div>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="rememberMe" checked>
+          <label for="rememberMe">Remember device session</label>
+        </div>
+
+        <button type="submit" class="btn-submit" id="submitBtn">
+          <span id="btnIcon">🔒</span>
+          <span id="btnText">Authenticate &amp; Enter Dashboard</span>
+        </button>
+
+        <!-- Quick Demo Accounts -->
+        <div style="margin-top:1.2rem; border-top:1px dashed var(--border); padding-top:1rem;">
+          <div style="font-size:0.75rem; font-family:var(--mono); color:var(--cyan); margin-bottom:0.6rem; text-transform:uppercase; letter-spacing:0.5px;">⚡ One-Click Demo Operator Logins:</div>
+          <div style="display:flex; flex-direction:column; gap:0.4rem;">
+            <button type="button" onclick="quickLogin('A. SHARMA', 'Dr. A. Sharma (GSI Lead Geologist)', 'ALL-ZONES')" style="background:rgba(0,243,255,0.08); border:1px solid rgba(0,243,255,0.3); color:#fff; padding:6px 10px; border-radius:6px; font-size:0.78rem; text-align:left; cursor:pointer; font-family:var(--sans); display:flex; justify-content:space-between; align-items:center; transition:var(--tx);">
+              <span>👨‍🔬 <strong>Dr. A. Sharma</strong> · GSI Lead Geologist</span>
+              <span style="color:var(--cyan); font-family:var(--mono); font-size:0.7rem;">ENTER →</span>
+            </button>
+            <button type="button" onclick="quickLogin('P. DESHMUKH', 'P. Deshmukh (Tunnel Safety Officer)', 'MAWSMAI,SIJU')" style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); color:#fff; padding:6px 10px; border-radius:6px; font-size:0.78rem; text-align:left; cursor:pointer; font-family:var(--sans); display:flex; justify-content:space-between; align-items:center; transition:var(--tx);">
+              <span>👷 <strong>P. Deshmukh</strong> · Tunnel Safety Engineer</span>
+              <span style="color:var(--amber); font-family:var(--mono); font-size:0.7rem;">ENTER →</span>
+            </button>
+            <button type="button" onclick="quickLogin('NDRF.COMMAND', 'NDRF Disaster Controller', 'AMARNATH,BORRA')" style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.3); color:#fff; padding:6px 10px; border-radius:6px; font-size:0.78rem; text-align:left; cursor:pointer; font-family:var(--sans); display:flex; justify-content:space-between; align-items:center; transition:var(--tx);">
+              <span>🚨 <strong>NDRF Command</strong> · Emergency Response</span>
+              <span style="color:var(--danger); font-family:var(--mono); font-size:0.7rem;">ENTER →</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="errorBox" class="error-box"></div>
+        <div class="auth-progress" id="authProgress"><div class="auth-bar" id="authBar"></div></div>
+      </form>
+    </div>
+
+    <!-- TAB 2: WORKER ON-THE-WAY SMS ALERTS -->
+    <div class="tab-content" id="tabWorker">
+      <div class="card-header">
+        <div class="header-live"><span class="live-dot"></span> LIVE CELLULAR DISPATCH</div>
+        <div class="card-title">En-Route Risk Alert Signup</div>
+      </div>
+      <p style="font-size:0.83rem; color:var(--muted); margin-bottom:1.2rem; line-height:1.5;">
+        Field workers, transport drivers, and site engineers: Enter your mobile number and assigned cave route to receive <strong>instant 30-minute SMS/WhatsApp early warnings</strong> before reaching hazard zones.
+      </p>
+
+      <form id="workerSmsForm" novalidate>
+        <div class="form-group">
+          <div class="form-label"><span>Field Worker / Engineer Name</span></div>
+          <div class="input-wrap">
+            <span class="input-icon">👤</span>
+            <input type="text" id="workerName" class="field" placeholder="e.g. Rajesh Kumar (Site Supervisor)" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-label"><span>Mobile Phone Number (India +91)</span><span class="label-hint">SMS &amp; WhatsApp</span></div>
+          <div class="input-wrap">
+            <span class="input-icon">📱</span>
+            <input type="tel" id="workerPhone" class="field" placeholder="+91 98765 43210" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="form-label"><span>Assigned Cave / Hazard Location</span></div>
+          <div class="input-wrap">
+            <span class="input-icon">📍</span>
+            <select id="workerCave" class="field" required>
+              <option value="">Select Cave Location / Travel Route...</option>
+              <option value="Amarnath Cave (J&K) — Baltal/Pahalgam Route">Amarnath Cave (J&K) — Baltal/Pahalgam Route</option>
+              <option value="Borra Caves (AP) — Araku Valley Route">Borra Caves (AP) — Araku Valley Route</option>
+              <option value="Belum Caves (AP) — Kurnool Highway">Belum Caves (AP) — Kurnool Highway</option>
+              <option value="Siju Cave (Meghalaya) — South Garo Hills">Siju Cave (Meghalaya) — South Garo Hills</option>
+              <option value="Mawsmai Cave (Meghalaya) — Cherrapunjee">Mawsmai Cave (Meghalaya) — Cherrapunjee</option>
+              <option value="Ajanta Caves (MH) — Aurangabad Sector">Ajanta Caves (MH) — Aurangabad Sector</option>
+              <option value="Elephanta Caves (MH) — Mumbai Marine Channel">Elephanta Caves (MH) — Mumbai Marine Channel</option>
+              <option value="Kutumsar Cave (CG) — Bastar Karst Corridor">Kutumsar Cave (CG) — Bastar Karst Corridor</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-submit btn-sms" id="smsSubmitBtn">
+          <span>📲</span>
+          <span>Register for Instant Emergency SMS Alerts</span>
+        </button>
+      </form>
+
+      <!-- Active Alert Subscription Box -->
+      <div id="smsSubscribedBox" class="registered-alerts-box" style="display:none;">
+        <div class="alert-box-title">
+          <span>✅ ALERT DISPATCH ACTIVE</span>
+        </div>
+        <div class="sms-preview-bubble" id="smsPreviewText">
+          Loading subscription details...
+        </div>
+      </div>
+    </div>
+
+    <!-- Security Badges -->
+    <div class="security-row">
+      <div class="sec-badge">🛡️ GSI Certified</div>
+      <div class="sec-badge">📡 NRSC InSAR</div>
+      <div class="sec-badge">📲 SMS Gateway</div>
+      <div class="sec-badge">🏛️ IIT Bombay</div>
+    </div>
+
+    <div class="footer">
+      Powered by <strong>Geological Survey of India · NRSC · IIT Bombay</strong><br>
+      Cave Safety &amp; Worker Protection Alliance · v3.2
+    </div>
+  </div>
+</div>
+
+<!-- System Status Strip -->
+<div class="status-strip">
+  <div class="status-item">
+    <div class="status-dot online"></div>
+    <span>GSI SEISMIC NETWORK: <strong>ONLINE</strong></span>
+  </div>
+  <div class="status-item">
+    <div class="status-dot online"></div>
+    <span>NRSC InSAR STREAM: <strong>ACTIVE</strong></span>
+  </div>
+  <div class="status-item">
+    <div class="status-dot warning"></div>
+    <span>AMARNATH PRECURSOR: <strong style="color:var(--danger)">ELEVATED (FoS 1.22)</strong></span>
+  </div>
+  <div class="status-item" id="backendStatusBadge">
+    <div class="status-dot online"></div>
+    <span>FASTAPI ENGINE: <strong style="color:var(--cyan)" id="backendLatencyText">CONNECTING...</strong></span>
+  </div>
+  <div class="status-item" style="margin-left:auto;">
+    <span id="clockStrip">IST --:--:--</span>
+  </div>
+</div>
+
+<!-- Toast notification box -->
+<div id="toast"></div>
+
+<script>
+/* ===== 1. Leaflet Interactive GIS Map ===== */
+let map, realTileLayer, satTileLayer;
+
+const INDIAN_CAVES = [
+  { id: 'BORRA', name: 'Borra Caves', state: 'Andhra Pradesh', lat: 18.2702, lon: 83.0323, risk: 'High', rmr: 48, col: '#f59e0b' },
+  { id: 'BELUM', name: 'Belum Caves', state: 'Andhra Pradesh', lat: 15.4468, lon: 78.0783, risk: 'Moderate', rmr: 54, col: '#10b981' },
+  { id: 'AMARNATH', name: 'Amarnath Cave', state: 'Jammu & Kashmir', lat: 34.2138, lon: 75.5007, risk: 'Critical', rmr: 38, col: '#ef4444' },
+  { id: 'KUTUMSAR', name: 'Kutumsar Cave', state: 'Chhattisgarh', lat: 19.0415, lon: 81.7981, risk: 'Moderate', rmr: 56, col: '#10b981' },
+  { id: 'SIJU', name: 'Siju Cave', state: 'Meghalaya', lat: 25.3885, lon: 90.6884, risk: 'High', rmr: 52, col: '#f59e0b' },
+  { id: 'AJANTA', name: 'Ajanta Caves', state: 'Maharashtra', lat: 20.5519, lon: 75.7033, risk: 'Moderate', rmr: 62, col: '#10b981' },
+  { id: 'ELEPHANTA', name: 'Elephanta Caves', state: 'Maharashtra', lat: 18.9634, lon: 72.9315, risk: 'High', rmr: 58, col: '#f59e0b' },
+  { id: 'MAWSMAI', name: 'Mawsmai Cave', state: 'Meghalaya', lat: 25.2516, lon: 91.7060, risk: 'Critical', rmr: 45, col: '#ef4444' }
+];
+
+function initLeafletMap() {
+  map = L.map('realMap', {
+    center: [22.5937, 78.9629],
+    zoom: 5,
+    zoomControl: false,
+    attributionControl: false
+  });
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  realTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+    subdomains: 'abcd'
+  }).addTo(map);
+
+  satTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 18
+  });
+
+  INDIAN_CAVES.forEach(c => {
+    const col = c.col;
+    const iconHtml = `
+      <div style="
+        width: 24px; height: 24px; border-radius: 50%;
+        background: ${col}; border: 2.5px solid #fff;
+        box-shadow: 0 0 16px ${col};
+        display: flex; align-items: center; justify-content: center;
+        color: #000; font-weight: bold; font-size: 11px; font-family: monospace;
+        cursor: pointer;
+      ">📍</div>
+    `;
+
+    const customIcon = L.divIcon({
+      html: iconHtml,
+      className: 'custom-map-pin',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
+
+    const marker = L.marker([c.lat, c.lon], { icon: customIcon }).addTo(map);
+    
+    const popupContent = `
+      <div style="font-family:'Outfit',sans-serif; padding:6px; min-width:180px;">
+        <div style="font-weight:700; font-size:1rem; color:${col};">${c.name}</div>
+        <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">${c.state}</div>
+        <div style="font-family:monospace; font-size:0.78rem; margin:8px 0; color:#fff;">
+          Risk: <strong style="color:${col}">${c.risk}</strong> | RMR: ${c.rmr}
+        </div>
+        <button onclick="launchCaveFromMap('${c.id}')" style="width:100%; background:rgba(0,243,255,0.15); border:1px solid #00f3ff; color:#00f3ff; padding:5px 8px; border-radius:6px; font-size:0.75rem; font-weight:700; cursor:pointer; font-family:sans-serif;">
+          🚀 Open Hazard Dashboard
+        </button>
+      </div>
+    `;
+
+    marker.bindPopup(popupContent, { className: 'custom-cave-popup' });
+  });
+
+  // Health ping
+  checkBackendHealth();
+}
+
+function launchCaveFromMap(caveId) {
+  const userData = {
+    id: 'GSI-FIELD-OPERATOR',
+    scope: caveId,
+    targetCave: caveId,
+    loginTime: new Date().toISOString(),
+    remember: true
+  };
+  sessionStorage.setItem('ewps_user', JSON.stringify(userData));
+  localStorage.setItem('ewps_user', JSON.stringify(userData));
+  window.location.href = `index.html?cave=${caveId}`;
+}
+
+function quickLogin(name, role, scope) {
+  document.getElementById('userId').value = name;
+  document.getElementById('userPass').value = 'GSI-SECURE-TOKEN-2026';
+  document.getElementById('accessScope').value = scope;
+  showToast(`Autofilled credentials for ${role}`, 'info');
+  document.getElementById('submitBtn').click();
+}
+
+async function checkBackendHealth() {
+  try {
+    const t0 = performance.now();
+    const res = await fetch('/health');
+    const latency = Math.round(performance.now() - t0);
+    if (res.ok) {
+      const data = await res.json();
+      const txt = document.getElementById('backendLatencyText');
+      if (txt) txt.textContent = `ONLINE (${latency}ms)`;
+    }
+  } catch (e) {
+    const txt = document.getElementById('backendLatencyText');
+    if (txt) txt.textContent = `STANDALONE (CLIENT-SIDE)`;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', initLeafletMap);
+
+/* Map mode toggles */
+document.getElementById('btnRealMap').onclick = function() {
+  this.classList.add('active');
+  document.getElementById('btnSatelliteMap').classList.remove('active');
+  map.removeLayer(satTileLayer);
+  realTileLayer.addTo(map);
+};
+
+document.getElementById('btnSatelliteMap').onclick = function() {
+  this.classList.add('active');
+  document.getElementById('btnRealMap').classList.remove('active');
+  map.removeLayer(realTileLayer);
+  satTileLayer.addTo(map);
+};
+
+/* ===== 2. Tab Switcher (Login vs Worker Alert Signup) ===== */
+function switchTab(tab) {
+  document.getElementById('tabLoginBtn').classList.toggle('active', tab === 'login');
+  document.getElementById('tabWorkerBtn').classList.toggle('active', tab === 'worker');
+  document.getElementById('tabLogin').classList.toggle('active', tab === 'login');
+  document.getElementById('tabWorker').classList.toggle('active', tab === 'worker');
+}
+
+/* ===== 3. Worker SMS Signup Form ===== */
+document.getElementById('workerSmsForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name  = document.getElementById('workerName').value.trim();
+  const phone = document.getElementById('workerPhone').value.trim();
+  const cave  = document.getElementById('workerCave').value;
+
+  if (!name || !phone || !cave) {
+    showToast('Please fill in all fields (Name, Phone, and Cave Route).', 'danger');
+    return;
+  }
+
+  const subData = { name, phone, cave, registeredAt: new Date().toLocaleTimeString('en-IN') };
+  localStorage.setItem('ewps_worker_sms', JSON.stringify(subData));
+
+  // Show active alert box
+  const box = document.getElementById('smsSubscribedBox');
+  const txt = document.getElementById('smsPreviewText');
+  box.style.display = 'block';
+  txt.innerHTML = `
+    📱 <strong>SMS ALERTS ACTIVE FOR:</strong> ${phone}<br>
+    👤 <strong>Worker:</strong> ${name}<br>
+    📍 <strong>Route:</strong> ${cave}<br>
+    <div style="margin-top:6px; color:#10b981;">
+      ✓ Automated 30-min risk notifications will be sent directly to your phone via EWPS SMS Gateway.
+    </div>
+  `;
+
+  showToast(`✅ Registered ${phone}! Emergency SMS dispatch enabled for ${name}.`, 'success');
+});
+
+/* Load existing worker subscription if present */
+(function checkWorkerSub() {
+  try {
+    const s = localStorage.getItem('ewps_worker_sms');
+    if (s) {
+      const d = JSON.parse(s);
+      const box = document.getElementById('smsSubscribedBox');
+      const txt = document.getElementById('smsPreviewText');
+      if (box && txt) {
+        box.style.display = 'block';
+        txt.innerHTML = `
+          📱 <strong>ACTIVE SUBSCRIPTION:</strong> ${d.phone}<br>
+          👤 <strong>Worker:</strong> ${d.name}<br>
+          📍 <strong>Route:</strong> ${d.cave}
+        `;
+      }
+    }
+  } catch(e) {}
+})();
+
+/* ===== 4. Operator Login Form ===== */
+document.getElementById('eyeBtn').onclick = () => {
+  const f = document.getElementById('userPass');
+  f.type = f.type === 'password' ? 'text' : 'password';
+};
+
+document.getElementById('forgotBtn').onclick = () => {
+  showToast('Password reset link sent to your GSI-registered email.', 'info');
+};
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const userId = document.getElementById('userId').value.trim();
+  const pass   = document.getElementById('userPass').value;
+  const errBox = document.getElementById('errorBox');
+  const btn    = document.getElementById('submitBtn');
+
+  errBox.classList.remove('active');
+
+  if (!userId) { showError('Please enter your Operator Badge ID or email.', 'userId'); return; }
+  if (pass.length < 4) { showError('Passcode must be at least 4 characters.', 'userPass'); return; }
+
+  btn.disabled = true;
+  document.getElementById('btnIcon').textContent = '⏳';
+  document.getElementById('btnText').textContent = 'Verifying credentials...';
+  document.getElementById('authProgress').classList.add('active');
+
+  await animateAuthBar();
+
+  const userData = {
+    id: userId,
+    scope: document.getElementById('accessScope').value.trim() || 'ALL',
+    loginTime: new Date().toISOString(),
+    remember: document.getElementById('rememberMe').checked
+  };
+
+  sessionStorage.setItem('ewps_user', JSON.stringify(userData));
+  if (userData.remember) localStorage.setItem('ewps_user', JSON.stringify(userData));
+
+  document.getElementById('btnIcon').textContent = '✅';
+  document.getElementById('btnText').textContent = 'Access Granted — Redirecting...';
+  showToast(`Welcome, ${userId}!`, 'info');
+
+  setTimeout(() => { window.location.href = 'index.html'; }, 900);
+});
+
+function showError(msg, fieldId) {
+  const errBox = document.getElementById('errorBox');
+  errBox.textContent = msg;
+  errBox.classList.add('active');
+}
+
+function animateAuthBar() {
+  return new Promise(resolve => {
+    const bar = document.getElementById('authBar');
+    let si = 0;
+    const steps = [
+      [20, 120, 'Verifying credentials...'],
+      [50, 180, 'Connecting GSI Telemetry...'],
+      [85, 150, 'Loading Cave Hazard Map...'],
+      [100, 160, 'Access granted!'],
+    ];
+    function step() {
+      if (si >= steps.length) { resolve(); return; }
+      const [target, delay, label] = steps[si++];
+      document.getElementById('btnText').textContent = label;
+      bar.style.width = target + '%';
+      setTimeout(step, delay);
+    }
+    step();
+  });
+}
+
+function showToast(msg, type='info') {
+  const c = document.getElementById('toast');
+  const t = document.createElement('div');
+  t.className = `toast-item ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  requestAnimationFrame(() => { t.style.opacity='1'; t.style.transform='translateY(0)'; });
+  setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(-10px)'; setTimeout(()=>t.remove(), 300); }, 3500);
+}
+
+function updateClock() {
+  const now = new Date();
+  const str = now.toLocaleString('en-IN', { timeZone:'Asia/Kolkata', hour12:false,
+    day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const el = document.getElementById('clockStrip');
+  if (el) el.textContent = `IST ${str}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+</script>
+</body>
+</html>
